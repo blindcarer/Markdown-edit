@@ -1,0 +1,1090 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <title>Markdown编辑器 | 多格式文件支持 | 表格转换</title>
+    
+    <!-- marked.js 渲染核心 -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <!-- highlight.js 代码高亮 -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/styles/github.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/highlight.js@11.9.0/lib/common.min.js"></script>
+    <!-- MathJax 数学公式渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js" id="MathJax-script" async></script>
+    <!-- Mermaid 图表渲染 -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <!-- SheetJS (XLSX) 核心库: 支持 xls, xlsx, csv 等表格文件导入 -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            font-family: system-ui, 'Segoe UI', 'Roboto', 'Helvetica Neue', sans-serif;
+            transition: background 0.2s ease, color 0.2s;
+            overflow: hidden;
+        }
+
+        #toolbar {
+            padding: 8px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 12px;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            backdrop-filter: blur(2px);
+            z-index: 10;
+            flex-shrink: 0;
+        }
+        .tool-group {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        #toolbar button {
+            padding: 6px 16px;
+            border: none;
+            cursor: pointer;
+            border-radius: 30px;
+            font-weight: 500;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+            background: #eaeef2;
+            color: #1f2a3e;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+        }
+        #toolbar button:hover { transform: translateY(-1px); filter: brightness(0.96); }
+        .active-theme { font-weight: bold; box-shadow: 0 0 0 2px white, 0 0 0 4px currentColor; transform: scale(1.02); }
+
+        /* 编辑栏 - 强制单行滚动，不换行 */
+        .edit-bar {
+            background: rgba(245, 247, 250, 0.92);
+            padding: 6px 16px;
+            display: flex;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            overflow-y: hidden;
+            gap: 6px;
+            align-items: center;
+            border-bottom: 1px solid rgba(0,0,0,0.08);
+            backdrop-filter: blur(4px);
+            flex-shrink: 0;
+            font-size: 0.8rem;
+            white-space: nowrap;
+            scrollbar-width: thin;
+        }
+        .edit-bar::-webkit-scrollbar {
+            height: 4px;
+        }
+        .edit-bar button {
+            background: #ffffffcc;
+            padding: 5px 12px;
+            border: none;
+            cursor: pointer;
+            border-radius: 24px;
+            font-weight: 500;
+            font-size: 0.75rem;
+            transition: all 0.2s;
+            box-shadow: 0 1px 1px rgba(0,0,0,0.05);
+            color: #1f2a3e;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+        .edit-bar button:hover { transform: translateY(-1px); background: #e2e6ea; }
+        .edit-bar .divider { width: 1px; height: 24px; background: rgba(0,0,0,0.2); margin: 0 4px; flex-shrink: 0; }
+        .edit-bar .group-label { font-size: 0.7rem; opacity: 0.7; margin-left: 2px; margin-right: 2px; font-weight: 500; flex-shrink: 0; }
+
+        .app-main {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            width: 100%;
+            min-height: 0;
+            position: relative;
+        }
+        
+        /* 左侧文件管理器 (支持多种格式) - 优化图标与文字间距 */
+        .file-explorer {
+            width: 260px;
+            background: rgba(248, 249, 250, 0.96);
+            border-right: 1px solid rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            flex-shrink: 0;
+            transition: width 0.2s;
+        }
+        .file-explorer.hidden {
+            width: 0;
+            border-right: none;
+            overflow: visible;
+        }
+        .explorer-header {
+            padding: 16px 12px 8px;
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid rgba(0,0,0,0.1);
+            flex-shrink: 0;
+        }
+        .explorer-header button {
+            background: none;
+            border: none;
+            font-size: 1.2rem;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 6px;
+        }
+        .folder-actions {
+            display: flex;
+            gap: 8px;
+            padding: 8px 12px;
+            flex-shrink: 0;
+        }
+        .folder-actions button {
+            flex: 1;
+            padding: 6px;
+            border-radius: 20px;
+            background: #e9ecef;
+            border: none;
+            cursor: pointer;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+        .file-tree {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0 16px 0;
+            font-size: 0.85rem;
+        }
+        .tree-item {
+            display: flex;
+            align-items: center;
+            padding: 5px 12px;
+            cursor: pointer;
+            border-radius: 8px;
+            margin: 2px 8px;
+            transition: background 0.1s;
+            gap: 10px;
+            white-space: nowrap;
+        }
+        .tree-item:hover { background: rgba(0,0,0,0.08); }
+        .tree-item.active { background: rgba(44, 125, 160, 0.25); font-weight: 500; }
+        .folder-toggle {
+            width: 20px;
+            text-align: center;
+            font-size: 0.7rem;
+            font-weight: bold;
+            user-select: none;
+            cursor: pointer;
+            color: #5f6c80;
+            flex-shrink: 0;
+        }
+        .folder-name, .file-name { 
+            flex: 1; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            margin-left: 2px;
+        }
+        .folder-icon, .file-icon { 
+            font-size: 1.1rem; 
+            width: 28px;
+            text-align: center;
+            flex-shrink: 0;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        /* 增强的文件图标样式: 支持图片、txt、csv 等 */
+        .file-icon-md, .file-icon-txt, .file-icon-csv, .file-icon-png, .file-icon-jpg, .file-icon-xls {
+            display: inline-block;
+            font-size: 0.7rem;
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 2px 6px;
+            line-height: 1.3;
+            letter-spacing: 0.3px;
+            text-align: center;
+            min-width: 36px;
+        }
+        .file-icon-md { background: linear-gradient(135deg, #2c7da0, #1f4e6e); color: white; }
+        .file-icon-txt { background: #6c757d; color: white; }
+        .file-icon-csv { background: #2b7a4b; color: white; }
+        .file-icon-png, .file-icon-jpg { background: #d97706; color: white; }
+        .file-icon-xls { background: #2c6e9e; color: white; }
+        
+        /* 编辑器容器 */
+        .editor-wrapper {
+            width: 50%;
+            display: flex;
+            flex-direction: column;
+            min-width: 200px;
+            position: relative;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+        
+        #editor {
+            width: 100%;
+            flex: 1;
+            border: none;
+            outline: none;
+            resize: none;
+            padding: 24px;
+            font-size: 15px;
+            line-height: 1.6;
+            font-family: 'SF Mono', 'Menlo', 'Cascadia Code', monospace;
+            background: inherit;
+            color: inherit;
+            overflow-y: auto;
+        }
+        
+        /* 可拖拽分隔条 */
+        .resize-handle {
+            width: 6px;
+            background: rgba(128, 128, 128, 0.3);
+            cursor: col-resize;
+            transition: background 0.2s;
+            flex-shrink: 0;
+            position: relative;
+            z-index: 20;
+        }
+        .resize-handle:hover { background: rgba(44, 125, 160, 0.7); }
+        .resize-handle.dragging { background: #2c7da0; }
+        body.resizing { cursor: col-resize !important; user-select: none !important; }
+        
+        .preview-container {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            position: relative;
+            min-width: 200px;
+        }
+        
+        .toc-panel {
+            width: 280px;
+            background: rgba(248, 249, 250, 0.98);
+            backdrop-filter: blur(4px);
+            border-left: 1px solid rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            transition: width 0.2s ease;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .toc-panel.hidden { width: 0; border-left: none; opacity: 0; pointer-events: none; }
+        
+        .preview-content {
+            flex: 1;
+            padding: 24px;
+            overflow-y: auto;
+            word-wrap: break-word;
+            background: inherit;
+        }
+        
+        .max-preview .editor-wrapper { display: none; }
+        .max-preview .resize-handle { display: none; }
+        .max-preview .preview-container { width: 100%; flex: none; }
+        .max-preview .file-explorer { width: 0 !important; display: none; }
+        
+        .toc-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 16px 12px; border-bottom: 1px solid rgba(0,0,0,0.1); font-weight: 600; flex-shrink: 0; }
+        .close-toc-btn { background: none; border: none; font-size: 1.3rem; cursor: pointer; padding: 0 6px; border-radius: 6px; opacity: 0.7; }
+        .toc-list { flex: 1; padding: 12px 8px 20px 12px; overflow-y: auto; }
+        .toc-list ul { list-style: none; padding-left: 0; }
+        .toc-list li { margin: 8px 0; line-height: 1.4; }
+        .toc-list a { text-decoration: none; color: inherit; display: block; padding: 5px 8px; border-radius: 8px; font-size: 0.85rem; cursor: pointer; }
+        .toc-list a:hover { background: rgba(100,100,100,0.15); padding-left: 14px; }
+        
+        .inline-toc { border-radius: 12px; padding: 16px 20px; margin: 20px 0; border-left: 4px solid; }
+        
+        /* 预览区脚注样式 —— 增强序号显示 */
+        .preview-content .footnote-ref {
+            vertical-align: super;
+            font-size: 0.75em;
+            text-decoration: none;
+        }
+        .preview-content .footnotes {
+            margin-top: 2em;
+            padding-top: 1em;
+            border-top: 1px solid;
+            font-size: 0.9em;
+        }
+        .preview-content .footnotes-list {
+            list-style: none;
+            padding-left: 0;
+            margin: 0;
+        }
+        .preview-content .footnotes-list li {
+            margin: 0.8em 0;
+            display: flex;
+            gap: 12px;
+            align-items: baseline;
+        }
+        .preview-content .footnote-marker {
+            font-weight: 700;
+            min-width: 2.2em;
+            font-size: 0.9em;
+            color: inherit;
+            opacity: 0.85;
+        }
+        .preview-content .footnote-text {
+            flex: 1;
+        }
+        .preview-content .footnote-backref {
+            margin-left: 8px;
+            text-decoration: none;
+            font-size: 0.8em;
+        }
+        
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: rgba(0,0,0,0.05); }
+        ::-webkit-scrollbar-thumb { background: rgba(100,100,100,0.4); border-radius: 10px; }
+        
+        /* 预览区通用样式 */
+        .preview-content { line-height: 1.7; }
+        .preview-content h1, .preview-content h2, .preview-content h3, .preview-content h4 { margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; scroll-margin-top: 70px; }
+        .preview-content h1 { font-size: 2rem; border-bottom: 2px solid; padding-bottom: 0.3em; }
+        .preview-content h2 { font-size: 1.6rem; border-bottom: 1px solid; padding-bottom: 0.2em; }
+        .preview-content ul, .preview-content ol { padding-left: 1.8em; margin: 0.6em 0; }
+        .preview-content li { margin: 0.3em 0; }
+        .preview-content blockquote { padding: 0.8em 1.2em; margin: 1em 0; border-left: 5px solid; border-radius: 8px; }
+        .preview-content pre { padding: 1rem; overflow-x: auto; border-radius: 12px; margin: 1.2em 0; }
+        .preview-content code { padding: 0.2em 0.4em; border-radius: 6px; font-family: monospace; }
+        .preview-content img { max-width: 100%; border-radius: 8px; display: block; margin: 1em auto; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+        .preview-content .math-display, .preview-content mjx-container[display="true"] { text-align: center; margin: 1em auto; display: block; overflow-x: auto; }
+        .preview-content .mermaid { text-align: center; margin: 1.5em auto; display: flex; justify-content: center; width: 100%; }
+        .preview-content .mermaid svg { max-width: 100%; height: auto; }
+        
+        .preview-content table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.2em 0;
+            display: block;
+            overflow-x: auto;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .preview-content th, .preview-content td {
+            padding: 12px 16px;
+            text-align: center;
+            vertical-align: middle;
+            border-bottom: 1px solid;
+            transition: background 0.2s ease;
+        }
+        .preview-content th { font-weight: 700; font-size: 0.95rem; letter-spacing: 0.5px; text-align: center; }
+        .preview-content tbody tr:hover td { transition: background 0.15s; }
+        .preview-content input[type="checkbox"] { margin-right: 8px; pointer-events: none; transform: scale(1.05); vertical-align: middle; }
+        
+        /* 代码块全局样式 (无白底) */
+        .preview-content pre {
+            background: #1e1e2f;
+            color: #e0e0e0;
+            border-radius: 12px;
+            padding: 1rem;
+            overflow-x: auto;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+        .preview-content code {
+            font-family: 'SF Mono', 'Menlo', 'Cascadia Code', monospace;
+            background: transparent;
+            color: inherit;
+            padding: 0.2em 0.4em;
+            border-radius: 6px;
+        }
+        .preview-content pre code {
+            background: transparent !important;
+            padding: 0;
+            color: inherit;
+        }
+        .preview-content blockquote {
+            background: rgba(128,128,128,0.08);
+            border-left-color: currentColor;
+        }
+        
+        body.light .preview-content pre { background: #282c34; color: #abb2bf; }
+        body.light .preview-content code { background: transparent; color: #c678dd; }
+        body.light .preview-content pre code { color: #abb2bf; }
+        body.dark .preview-content pre { background: #0d1117; color: #e6edf3; }
+        body.dark .preview-content code { background: transparent; color: #f97583; }
+        body.dark .preview-content pre code { color: #e6edf3; }
+        body.highlight .preview-content pre { background: #2a2418; color: #f0e6d2; }
+        body.highlight .preview-content code { background: transparent; color: #d99b38; }
+        body.highlight .preview-content pre code { color: #f0e6d2; }
+        body.colorblind .preview-content pre { background: #000000; color: #f0f0f0; border: 1px solid #fff; }
+        body.colorblind .preview-content code { background: transparent; color: #ffff00; }
+        body.colorblind .preview-content pre code { color: #f0f0f0; }
+        
+        body.light .preview-content blockquote { background: rgba(0,0,0,0.04); border-left-color: #0366d6; }
+        body.dark .preview-content blockquote { background: rgba(255,255,255,0.05); border-left-color: #58a6ff; }
+        body.highlight .preview-content blockquote { background: rgba(100,60,10,0.1); border-left-color: #e6b422; }
+        body.colorblind .preview-content blockquote { background: #1f1f1f; border-left-color: white; }
+        
+        body.light { background: #f8f9fa; color: #1e2a3e; }
+        body.light #toolbar, body.light .edit-bar, body.light .file-explorer { background: #ffffffcc; border-bottom: 1px solid #dee2e6; }
+        body.light .file-explorer { background: #f8f9faee; }
+        body.light button, body.light .edit-bar button { background: #e9ecef; color: #212529; }
+        body.light #editor { background: #ffffff; }
+        body.light .preview-content { background: #fefefe; }
+        body.light .preview-content th { background: #e9ecef; border-color: #dee2e6; }
+        body.light .preview-content td { border-color: #e9ecef; background: #ffffff; }
+        body.light .preview-content tbody tr:hover td { background: #f1f5f9; }
+        
+        body.dark { background: #0f172a; color: #e2e8f0; }
+        body.dark #toolbar, body.dark .edit-bar, body.dark .file-explorer { background: #1e293bb3; border-bottom: 1px solid #334155; }
+        body.dark .file-explorer { background: #111827e6; }
+        body.dark button, body.dark .edit-bar button { background: #334155; color: #f1f5f9; }
+        body.dark #editor { background: #0f172a; }
+        body.dark .preview-content { background: #0f172a; }
+        body.dark .preview-content th { background: #1e293b; border-color: #334155; }
+        body.dark .preview-content td { border-color: #334155; background: #0f172a; }
+        body.dark .preview-content tbody tr:hover td { background: #1e293b; }
+        
+        body.highlight { background: #fef9e6; color: #5d3a1a; }
+        body.highlight #toolbar, body.highlight .edit-bar, body.highlight .file-explorer { background: #ffefc0cc; border-bottom: 1px solid #f3d382; }
+        body.highlight .file-explorer { background: #fff6e5f2; }
+        body.highlight button, body.highlight .edit-bar button { background: #ffdfa5; color: #5a3a1c; }
+        body.highlight #editor { background: #fff7e8; }
+        body.highlight .preview-content { background: #fffcf0; }
+        body.highlight .preview-content th { background: #ffe4b5; border-color: #f3d382; }
+        body.highlight .preview-content td { border-color: #f3d382; background: #fffcf0; }
+        body.highlight .preview-content tbody tr:hover td { background: #fff0d4; }
+        
+        body.colorblind { background: #000000; color: #f0f0f0; }
+        body.colorblind #toolbar, body.colorblind .edit-bar, body.colorblind .file-explorer { background: #111111; border-bottom: 2px solid white; }
+        body.colorblind .file-explorer { background: #0a0a0af2; }
+        body.colorblind button, body.colorblind .edit-bar button { background: #222; color: white; border: 1px solid #fff; }
+        body.colorblind #editor { background: #000; }
+        body.colorblind .preview-content { background: #000; }
+        body.colorblind .preview-content th { background: #1f1f1f; color: #ffffff; border: 1px solid #ffffff; }
+        body.colorblind .preview-content td { border: 1px solid #666; background: #000000; }
+        body.colorblind .preview-content tbody tr:hover td { background: #222222; }
+    </style>
+</head>
+<body class="light">
+
+<div id="toolbar">
+    <div class="tool-group">
+        <button id="toggleFileExplorerBtn">📁 文件管理</button>
+        <button id="importBtn">📂 导入文件</button>
+        <button id="saveBtn">💾 保存文件</button>
+        <button id="maxPreviewBtn">🔍 最大化预览</button>
+        <button id="generateTocBtn">📑 侧边目录</button>
+        <input type="file" id="fileInput" accept=".md,.markdown,.txt,.csv,.png,.jpg,.jpeg,.xlsx,.xls" hidden>
+    </div>
+    <div class="tool-group" id="themeGroup">
+        <button data-theme="light" class="theme-btn active-theme">☀️ 浅色</button>
+        <button data-theme="dark" class="theme-btn">🌙 深色</button>
+        <button data-theme="highlight" class="theme-btn">✨ 高亮</button>
+        <button data-theme="colorblind" class="theme-btn">♿ 色盲</button>
+    </div>
+</div>
+
+<!-- 编辑栏：单行滚动布局 -->
+<div class="edit-bar">
+    <span class="group-label">✍️</span>
+    <button id="boldBtn"><strong>B</strong></button>
+    <button id="italicBtn"><em>I</em></button>
+    <button id="strikeBtn"><s>S</s></button>
+    <button id="highlightBtn">H<sup>★</sup></button>
+    <div class="divider"></div>
+    <button id="h1Btn">H1</button><button id="h2Btn">H2</button><button id="h3Btn">H3</button>
+    <div class="divider"></div>
+    <button id="ulBtn">•列表</button><button id="olBtn">1.列表</button><button id="taskBtn">☑任务</button>
+    <div class="divider"></div>
+    <button id="quoteBtn">“引用</button><button id="codeBtn">&lt;/&gt;代码</button>
+    <button id="linkBtn">🔗链接</button><button id="imgBtn">🖼️图片</button><button id="tableBtn">⊞表格</button>
+    <div class="divider"></div>
+    <button id="footnoteBtn">📝脚注</button>
+    <div class="divider"></div>
+    <button id="mathBtn">∫公式</button><button id="mermaidBtn">📊图表</button>
+    <div class="divider"></div>
+    <button id="hrBtn">—分割线—</button>
+    <div class="divider"></div>
+    <button id="pasteTableBtn" style="background:#7c9cbf; color:white;">📋 粘贴表格(转Markdown)</button>
+</div>
+
+<div class="app-main">
+    <div class="file-explorer" id="fileExplorer">
+        <div class="explorer-header"><span>📁 文件管理器</span><button id="closeExplorerBtn">✕</button></div>
+        <div class="folder-actions"><button id="selectFolderBtn">📂 选择文件夹</button><button id="refreshFolderBtn">🔄 刷新</button></div>
+        <div class="file-tree" id="fileTree"><div style="padding:20px;text-align:center;opacity:0.6;">点击“选择文件夹”<br>加载Markdown/文本/CSV/图片文件</div></div>
+    </div>
+    
+    <div class="editor-wrapper" id="editorWrapper">
+        <textarea id="editor" placeholder="在此输入 Markdown ... 支持脚注 [^1]、图片、数学公式、mermaid、列表、表格"></textarea>
+    </div>
+    
+    <div class="resize-handle" id="resizeHandle"></div>
+    
+    <div class="preview-container" id="previewContainer">
+        <div class="preview-content" id="previewContent"></div>
+        <div class="toc-panel hidden" id="tocPanel">
+            <div class="toc-header"><h4>📖 文章目录</h4><button class="close-toc-btn" id="closeTocBtn">✕</button></div>
+            <div class="toc-list" id="tocList"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function() {
+        // detect tauri environment
+        const isTauri = typeof window.__TAURI__ !== 'undefined' && window.__TAURI__.tauri;
+
+        // ---------- 原有代码核心 (保留完整功能) ----------
+        const editor = document.getElementById('editor');
+        const previewContent = document.getElementById('previewContent');
+        const fileInput = document.getElementById('fileInput');
+        const importBtn = document.getElementById('importBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const maxBtn = document.getElementById('maxPreviewBtn');
+        const themeButtons = document.querySelectorAll('.theme-btn');
+        const generateTocBtn = document.getElementById('generateTocBtn');
+        const tocPanel = document.getElementById('tocPanel');
+        const closeTocBtn = document.getElementById('closeTocBtn');
+        const tocListContainer = document.getElementById('tocList');
+        const fileExplorer = document.getElementById('fileExplorer');
+        const toggleFileExplorerBtn = document.getElementById('toggleFileExplorerBtn');
+        const closeExplorerBtn = document.getElementById('closeExplorerBtn');
+        const selectFolderBtn = document.getElementById('selectFolderBtn');
+        const refreshFolderBtn = document.getElementById('refreshFolderBtn');
+        const fileTreeDiv = document.getElementById('fileTree');
+        const editorWrapper = document.getElementById('editorWrapper');
+        const resizeHandle = document.getElementById('resizeHandle');
+        const previewContainer = document.getElementById('previewContainer');
+        const appMain = document.querySelector('.app-main');
+        
+        let currentFileName = 'untitled.md';
+        let currentFolderHandle = null;
+        let currentFolderPath = null; // for tauri mode
+        let currentActiveFileDiv = null;
+        
+        function getFileIconHtml(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            if (ext === 'md' || ext === 'markdown') return '<span class="file-icon-md">MD</span>';
+            if (ext === 'txt') return '<span class="file-icon-txt">TXT</span>';
+            if (ext === 'csv') return '<span class="file-icon-csv">CSV</span>';
+            if (ext === 'png') return '<span class="file-icon-png">PNG</span>';
+            if (ext === 'jpg' || ext === 'jpeg') return '<span class="file-icon-jpg">JPG</span>';
+            if (ext === 'xlsx' || ext === 'xls') return '<span class="file-icon-xls">XLS</span>';
+            return '<span class="file-icon-txt">📄</span>';
+        }
+        
+        function isTextEditable(filename) {
+            const ext = filename.split('.').pop().toLowerCase();
+            return ['md', 'markdown', 'txt', 'csv'].includes(ext);
+        }
+        
+        // 转换 SheetJS 读取的数据为 Markdown 表格
+        function sheetToMarkdown(sheet) {
+            const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+            if (!data || data.length === 0) return "";
+            const maxCols = data.reduce((max, row) => Math.max(max, row.length), 0);
+            const normalized = data.map(row => {
+                const newRow = [...row];
+                while (newRow.length < maxCols) newRow.push("");
+                return newRow.map(cell => (cell === undefined || cell === null) ? "" : String(cell).trim());
+            });
+            if (normalized.length === 0) return "";
+            let markdown = "";
+            const headers = normalized[0];
+            markdown += "| " + headers.join(" | ") + " |\n";
+            markdown += "|" + headers.map(() => "---").join("|") + "|\n";
+            for (let i = 1; i < normalized.length; i++) {
+                markdown += "| " + normalized[i].join(" | ") + " |\n";
+            }
+            return markdown;
+        }
+        
+        async function loadFileContent(fileOrPath, fileName) {
+            // 支持两种模式：浏览器 FileHandle（早期实现）或 Tauri 模式：传入文件绝对路径字符串
+            if (isTauri && typeof fileOrPath === 'string') {
+                try {
+                    const text = await window.__TAURI__.tauri.invoke('read_text_file', { path: fileOrPath });
+                    return text;
+                } catch (e) {
+                    console.error('tauri read_text_file error', e);
+                    return '';
+                }
+            }
+            const fileHandle = fileOrPath;
+            const ext = fileName.split('.').pop().toLowerCase();
+            const file = await fileHandle.getFile();
+            if (ext === 'png' || ext === 'jpg' || ext === 'jpeg') {
+                const reader = new FileReader();
+                return new Promise((resolve) => {
+                    reader.onload = function(e) { resolve(`![${fileName}](${e.target.result})`); };
+                    reader.readAsDataURL(file);
+                });
+            } else if (ext === 'xlsx' || ext === 'xls') {
+                return new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = function(e) {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                        const markdownTable = sheetToMarkdown(firstSheet);
+                        resolve(markdownTable || "# 表格内容为空\n");
+                    };
+                    reader.onerror = reject;
+                    reader.readAsArrayBuffer(file);
+                });
+            } else {
+                return await file.text();
+            }
+        }
+        
+        async function buildCollapsibleTree(handle, containerUl, pathPrefix) {
+            // 浏览器模式：原有递归构建
+            if (!isTauri) {
+                const li = document.createElement('li');
+                li.style.listStyle = 'none';
+                const div = document.createElement('div');
+                div.className = 'tree-item';
+                if (handle.kind === 'directory') {
+                    const toggleSpan = document.createElement('span');
+                    toggleSpan.className = 'folder-toggle';
+                    toggleSpan.textContent = '▼';
+                    div.appendChild(toggleSpan);
+                    const folderIconSpan = document.createElement('span');
+                    folderIconSpan.className = 'folder-icon';
+                    folderIconSpan.textContent = '📁';
+                    div.appendChild(folderIconSpan);
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'folder-name';
+                    nameSpan.textContent = handle.name;
+                    div.appendChild(nameSpan);
+                    li.appendChild(div);
+                    const childUl = document.createElement('ul');
+                    childUl.style.paddingLeft = '20px';
+                    li.appendChild(childUl);
+                    toggleSpan.onclick = (e) => {
+                        e.stopPropagation();
+                        if (childUl.style.display === 'none') { childUl.style.display = ''; toggleSpan.textContent = '▼'; }
+                        else { childUl.style.display = 'none'; toggleSpan.textContent = '▶'; }
+                    };
+                    for await (const entry of handle.values()) await buildCollapsibleTree(entry, childUl, pathPrefix + handle.name + '/');
+                } else if (handle.kind === 'file') {
+                    const ext = handle.name.split('.').pop().toLowerCase();
+                    const allowed = ['md', 'markdown', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'];
+                    if (!allowed.includes(ext)) return;
+                    const iconSpan = document.createElement('span');
+                    iconSpan.className = 'file-icon';
+                    iconSpan.innerHTML = getFileIconHtml(handle.name);
+                    const nameSpan = document.createElement('span');
+                    nameSpan.className = 'file-name';
+                    nameSpan.textContent = handle.name;
+                    div.appendChild(iconSpan);
+                    div.appendChild(nameSpan);
+                    li.appendChild(div);
+                    div.onclick = async (e) => {
+                        e.stopPropagation();
+                        if (currentActiveFileDiv) currentActiveFileDiv.classList.remove('active');
+                        div.classList.add('active');
+                        currentActiveFileDiv = div;
+                        try {
+                            const content = await loadFileContent(handle, handle.name);
+                            editor.value = content;
+                            currentFileName = handle.name;
+                            await renderMarkdown();
+                        } catch(err) { console.error(err); alert("无法读取文件"); }
+                    };
+                } else return;
+                containerUl.appendChild(li);
+                return;
+            }
+            // Tauri 模式：handle 参数为文件路径字符串，此函数不用于递归
+        }
+        
+        async function selectFolder() {
+            if (isTauri) {
+                try {
+                    const res = await window.__TAURI__.tauri.invoke('select_folder');
+                    // res: { root: string, files: string[] }
+                    if (!res || !res.files || !res.files.length) { fileTreeDiv.innerHTML = '<div style="padding:20px;text-align:center;opacity:0.6;">无文件</div>'; return; }
+                    currentFolderPath = res.root;
+                    fileTreeDiv.innerHTML = '';
+                    const ul = document.createElement('ul'); ul.style.listStyle = 'none';
+                    for (const p of res.files) {
+                        const li = document.createElement('li');
+                        li.style.listStyle = 'none';
+                        const div = document.createElement('div');
+                        div.className = 'tree-item';
+                        const name = p.split(/\\|\//).pop();
+                        const ext = name.split('.').pop().toLowerCase();
+                        const allowed = ['md', 'markdown', 'txt', 'csv', 'png', 'jpg', 'jpeg', 'xlsx', 'xls'];
+                        if (!allowed.includes(ext)) continue;
+                        const iconSpan = document.createElement('span'); iconSpan.className='file-icon'; iconSpan.innerHTML = getFileIconHtml(name);
+                        const nameSpan = document.createElement('span'); nameSpan.className='file-name'; nameSpan.textContent = name;
+                        div.appendChild(iconSpan); div.appendChild(nameSpan); li.appendChild(div); ul.appendChild(li);
+                        div.onclick = async (e) => {
+                            e.stopPropagation();
+                            if (currentActiveFileDiv) currentActiveFileDiv.classList.remove('active');
+                            div.classList.add('active'); currentActiveFileDiv = div;
+                            try {
+                                const content = await window.__TAURI__.tauri.invoke('read_text_file', { path: p });
+                                editor.value = content;
+                                currentFileName = name;
+                                await renderMarkdown();
+                            } catch (err) { console.error(err); alert('无法读取文件'); }
+                        };
+                    }
+                    fileTreeDiv.appendChild(ul);
+                } catch (e) { console.error(e); alert('无法访问文件夹'); }
+                return;
+            }
+            try {
+                const dirHandle = await window.showDirectoryPicker();
+                currentFolderHandle = dirHandle;
+                fileTreeDiv.innerHTML = '';
+                const rootUl = document.createElement('ul');
+                rootUl.style.listStyle = 'none';
+                await buildCollapsibleTree(dirHandle, rootUl, '');
+                fileTreeDiv.appendChild(rootUl);
+            } catch(e) { if(e.name !== 'AbortError') alert("无法访问文件夹"); }
+        }
+        
+        async function refreshFolder() {
+            if (isTauri) {
+                if (!currentFolderPath) { alert('请先选择文件夹'); return; }
+                try {
+                    const entries = await window.__TAURI__.tauri.invoke('list_dir', { path: currentFolderPath });
+                    fileTreeDiv.innerHTML = '';
+                    const ul = document.createElement('ul'); ul.style.listStyle='none';
+                    for (const p of entries) {
+                        const li = document.createElement('li'); li.style.listStyle='none';
+                        const div = document.createElement('div'); div.className='tree-item';
+                        const name = p.split(/\\|\//).pop();
+                        const ext = name.split('.').pop().toLowerCase();
+                        const allowed = ['md','markdown','txt','csv','png','jpg','jpeg','xlsx','xls'];
+                        if(!allowed.includes(ext)) continue;
+                        const iconSpan=document.createElement('span'); iconSpan.className='file-icon'; iconSpan.innerHTML=getFileIconHtml(name);
+                        const nameSpan=document.createElement('span'); nameSpan.className='file-name'; nameSpan.textContent=name;
+                        div.appendChild(iconSpan); div.appendChild(nameSpan); li.appendChild(div); ul.appendChild(li);
+                        div.onclick = async (e) => { e.stopPropagation(); if(currentActiveFileDiv) currentActiveFileDiv.classList.remove('active'); div.classList.add('active'); currentActiveFileDiv=div; try { const content = await window.__TAURI__.tauri.invoke('read_text_file', { path: p }); editor.value = content; currentFileName = name; await renderMarkdown(); } catch(err){ console.error(err); alert('无法读取文件'); } }
+                    }
+                    fileTreeDiv.appendChild(ul);
+                } catch (e) { console.error(e); alert('刷新失败'); }
+                return;
+            }
+            if(currentFolderHandle) {
+                fileTreeDiv.innerHTML = '';
+                const rootUl = document.createElement('ul');
+                await buildCollapsibleTree(currentFolderHandle, rootUl, '');
+                fileTreeDiv.appendChild(rootUl);
+            } else alert("请先选择文件夹");
+        }
+        
+        let isScrollingSync = false;
+        function syncScroll(source, target) {
+            if (isScrollingSync) return;
+            isScrollingSync = true;
+            const srcRatio = source.scrollTop / (source.scrollHeight - source.clientHeight);
+            if (isFinite(srcRatio) && source.scrollHeight > source.clientHeight) {
+                target.scrollTop = srcRatio * (target.scrollHeight - target.clientHeight);
+            }
+            setTimeout(() => { isScrollingSync = false; }, 50);
+        }
+        function initScrollSync() {
+            editor.addEventListener('scroll', () => { if (!document.body.classList.contains('max-preview') && previewContent) syncScroll(editor, previewContent); });
+            previewContent.addEventListener('scroll', () => { if (!document.body.classList.contains('max-preview') && editor) syncScroll(previewContent, editor); });
+        }
+        
+        function getNextFootnoteId() { /* 保留原逻辑 */ 
+            const content = editor.value;
+            const regex = /\[\^(\d+)\]/g;
+            let maxId = 0, match;
+            while ((match = regex.exec(content)) !== null) { const id = parseInt(match[1], 10); if (id > maxId) maxId = id; }
+            const defRegex = /\[\^(\d+)\]:/g;
+            while ((match = defRegex.exec(content)) !== null) { const id = parseInt(match[1], 10); if (id > maxId) maxId = id; }
+            return maxId + 1;
+        }
+        function insertFootnote() {
+            const nextId = getNextFootnoteId();
+            const cursorPos = editor.selectionStart;
+            const beforeCursor = editor.value.substring(0, cursorPos);
+            const afterCursor = editor.value.substring(cursorPos);
+            const footnoteRef = `[^${nextId}]`;
+            editor.value = beforeCursor + footnoteRef + afterCursor;
+            if (!new RegExp(`\\[\\^${nextId}\\]:`, 'g').test(editor.value)) {
+                let footerText = editor.value;
+                if (!footerText.endsWith('\n\n')) footerText += '\n\n';
+                footerText += `[^${nextId}]: 脚注内容${nextId}`;
+                editor.value = footerText;
+            }
+            editor.setSelectionRange(cursorPos + footnoteRef.length, cursorPos + footnoteRef.length);
+            editor.focus();
+            scheduleRender();
+        }
+        
+        // 增强CSV转换函数：将原始CSV文本转换为HTML表格 (解决预览区不显示表格的核心)
+        function csvToHtmlTable(csvText) {
+            if (!csvText.trim()) return '';
+            const lines = csvText.trim().split(/\r?\n/);
+            if (lines.length === 0) return '';
+            const rows = lines.map(line => {
+                // 简单的CSV解析，支持引号包裹但为了稳定，采用分割逗号，但兼容标准分割
+                let cells = [];
+                let inQuote = false;
+                let current = '';
+                for (let i = 0; i < line.length; i++) {
+                    const ch = line[i];
+                    if (ch === '"') {
+                        inQuote = !inQuote;
+                    } else if (ch === ',' && !inQuote) {
+                        cells.push(current.trim());
+                        current = '';
+                    } else {
+                        current += ch;
+                    }
+                }
+                cells.push(current.trim());
+                // 去除每个单元格可能的首尾引号
+                cells = cells.map(c => c.replace(/^"(.*)"$/, '$1').replace(/""/g, '"'));
+                return cells;
+            });
+            if (rows.length === 0) return '';
+            const maxCols = rows.reduce((max, row) => Math.max(max, row.length), 0);
+            const normalizedRows = rows.map(row => {
+                while (row.length < maxCols) row.push('');
+                return row;
+            });
+            let html = '<div class="csv-table-wrapper"><table class="csv-preview-table"><thead><tr>';
+            normalizedRows[0].forEach(cell => html += `<th>${escapeHtml(cell)}</th>`);
+            html += '</tr></thead><tbody>';
+            for (let i = 1; i < normalizedRows.length; i++) {
+                html += '<tr>';
+                normalizedRows[i].forEach(cell => html += `<td>${escapeHtml(cell)}</td>`);
+                html += '</tr>';
+            }
+            html += '</tbody></table></div>';
+            return html;
+        }
+        
+        async function renderMarkdown() { 
+            let rawText = editor.value;
+            if (!rawText.trim()) { previewContent.innerHTML = '<p style="opacity:0.7; text-align:center; margin-top:2rem;">✨ 左侧编辑Markdown，支持图片、CSV等预览(CSV转为表格)</p>'; updateSideToc(); return; }
+            try {
+                let processed = rawText;
+                // 关键修复: 如果当前文件是CSV格式，直接使用csvToHtmlTable渲染为表格，而非当成普通Markdown
+                if (currentFileName && (currentFileName.endsWith('.csv') || currentFileName.endsWith('.CSV'))) {
+                    const tableHtml = csvToHtmlTable(processed);
+                    if (tableHtml) {
+                        previewContent.innerHTML = tableHtml;
+                        await afterRender();
+                        return;
+                    }
+                }
+                
+                // 原有的智能CSV检测（当内容相似表格且未包含管道符）
+                if (!processed.includes('|') && processed.includes(',') && processed.split('\n').length > 1 && processed.split('\n')[0].split(',').length > 1) {
+                    // 若看起来像CSV但不是以.md结尾，尝试显示表格（增强预览）
+                    const tableHtml = csvToHtmlTable(processed);
+                    if (tableHtml && tableHtml.includes('<table>')) {
+                        previewContent.innerHTML = tableHtml;
+                        await afterRender();
+                        return;
+                    }
+                }
+                
+                const defRegex = /\[\^(\d+)\]:\s*(.+?)(?=\n\[\^\d+\]:|\n\n|$)/gs;
+                const footnotesMap = new Map();
+                let tempText = processed;
+                let match;
+                while ((match = defRegex.exec(processed)) !== null) { footnotesMap.set(match[1], match[2].trim()); tempText = tempText.replace(match[0], ''); }
+                tempText = tempText.replace(/==(.*?)==/g, '<mark>$1</mark>');
+                const tocMatch = tempText.match(/^\s*\[TOC\]\s*$/gmi);
+                let headers = [];
+                if (tocMatch) {
+                    const tocData = generateTocFromText(tempText);
+                    if (tocData.html) { tempText = tempText.replace(/^\s*\[TOC\]\s*$/gmi, tocData.html); headers = tocData.headers; }
+                }
+                if (typeof marked !== 'undefined') {
+                    marked.setOptions({ breaks: true, gfm: true, headerIds: true, mangle: false, highlight: function(code, lang) { if (lang === 'mermaid') return code; if (typeof hljs !== 'undefined') { if (lang && hljs.getLanguage(lang)) try { return hljs.highlight(code, { language: lang }).value; } catch(e) {} try { return hljs.highlightAuto(code).value; } catch(e) {} } return code; } });
+                    let html = await marked.parse(tempText);
+                    html = addHeaderIds(html, headers);
+                    html = html.replace(/\[\^(\d+)\]/g, (match, id) => `<sup class="footnote-ref"><a href="#fn-${id}" id="fnref-${id}">[${id}]</a></sup>`);
+                    const footnoteIds = Array.from(footnotesMap.keys()).sort((a,b)=>Number(a)-Number(b));
+                    if (footnoteIds.length > 0) {
+                        let footnotesHtml = '<div class="footnotes"><h4>📌 脚注</h4><ol class="footnotes-list" style="list-style:none;">';
+                        for (const id of footnoteIds) {
+                            let parsedContent = footnotesMap.get(id) || '';
+                            try { parsedContent = await marked.parseInline(parsedContent); } catch(e) {}
+                            footnotesHtml += `<li id="fn-${id}"><span class="footnote-marker">[${id}]</span><span class="footnote-text">${parsedContent}</span> <a href="#fnref-${id}" class="footnote-backref">↩</a></li>`;
+                        }
+                        footnotesHtml += '</ol></div>';
+                        html += footnotesHtml;
+                    }
+                    html = extractMermaidBlocks(html);
+                    previewContent.innerHTML = html;
+                    await afterRender();
+                } else { previewContent.innerHTML = simpleRender(tempText); await afterRender(); }
+            } catch(e) { console.error(e); previewContent.innerHTML = simpleRender(editor.value); afterRender(); }
+        }
+        
+        function generateTocFromText(text) { const lines = text.split('\n'); const headers = []; for (let i=0;i<lines.length;i++) { const match = lines[i].match(/^(#{1,4})\s+(.+)$/); if(match) { const level = match[1].length; let title = match[2].trim().replace(/\*\*(.*?)\*\*/g,'$1'); const id = `h-${Date.now()}-${i}`; headers.push({ level, title, id }); } } if(!headers.length) return { html:'', headers:[] }; let html = '<div class="inline-toc"><h4>📖 目录</h4><ul>'; let lastLevel=1; for(let i=0;i<headers.length;i++){ const h=headers[i]; if(h.level>lastLevel) for(let j=lastLevel;j<h.level;j++) html+='<ul>'; else if(h.level<lastLevel){ for(let j=h.level;j<lastLevel;j++) html+='</ul></li>'; if(lastLevel!==1) html+='</li>'; } else if(i>0) html+='</li>'; html+=`<li><a href="#${h.id}" class="toc-link-inline" data-id="${h.id}">${escapeHtml(h.title)}</a>`; lastLevel=h.level; } for(let i=1;i<lastLevel;i++) html+='</li></ul>'; html+='</ul></div>'; return { html, headers }; }
+        function addHeaderIds(html, headers) { let result = html; for (const h of headers) { const escTitle = h.title.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); const regex = new RegExp(`(<h${h.level}[^>]*>)(.*?${escTitle}.*?)(</h${h.level}>)`, 'i'); result = result.replace(regex, `$1<span id="${h.id}" style="scroll-margin-top:70px;">$2</span>$3`); } return result; }
+        function extractMermaidBlocks(html) { const temp = document.createElement('div'); temp.innerHTML = html; temp.querySelectorAll('pre code.language-mermaid, code.language-mermaid').forEach(codeElem => { const mermaidDiv = document.createElement('div'); mermaidDiv.className = 'mermaid'; mermaidDiv.textContent = codeElem.textContent; const parent = codeElem.parentElement; if (parent && parent.tagName === 'PRE') parent.parentNode.replaceChild(mermaidDiv, parent); else codeElem.parentNode.replaceChild(mermaidDiv, codeElem); }); return temp.innerHTML; }
+        async function afterRender() { if (typeof hljs !== 'undefined') previewContent.querySelectorAll('pre code:not(.language-mermaid)').forEach(block => hljs.highlightElement(block)); updateSideToc(); bindTocLinks(); previewContent.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.disabled = true); try { await mermaid.run({ nodes: previewContent.querySelectorAll('.mermaid'), suppressErrors: true }); } catch(e) {} if (window.MathJax) MathJax.typesetPromise ? MathJax.typesetPromise([previewContent]) : MathJax.typeset([previewContent]); }
+        function updateSideToc() { const headers = previewContent.querySelectorAll('h1, h2, h3, h4'); if (!headers.length) { tocListContainer.innerHTML = '<p style="opacity:0.6; padding:12px;">无标题</p>'; return; } window.headerMap = window.headerMap || new Map(); window.headerMap.clear(); let html = '<ul style="list-style:none;">'; headers.forEach((h, idx) => { if (!h.id) h.id = 'side-'+Date.now()+'-'+idx; window.headerMap.set(h.id, h); const level = parseInt(h.tagName[1]); const indent = (level-1)*16; html += `<li style="margin-left:${indent}px; margin-top:6px;"><a class="toc-side-link" data-id="${h.id}" style="cursor:pointer; display:block; padding:4px 8px; border-radius:6px;">${escapeHtml(h.innerText.trim())}</a></li>`; }); html += '</ul>'; tocListContainer.innerHTML = html; document.querySelectorAll('.toc-side-link').forEach(link => { link.onclick = (e) => { e.preventDefault(); const target = window.headerMap.get(link.getAttribute('data-id')); if(target) target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; }); }
+        function bindTocLinks() { document.querySelectorAll('.toc-link-inline').forEach(link => { link.onclick = (e) => { e.preventDefault(); const el = document.getElementById(link.getAttribute('data-id')); if(el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }; }); }
+        function simpleRender(text) { return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/^# (.*?)$/gm,'<h1>$1</h1>').replace(/^## (.*?)$/gm,'<h2>$1</h2>').replace(/^### (.*?)$/gm,'<h3>$1</h3>').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\*(.*?)\*/g,'<em>$1</em>').replace(/==(.*?)==/g,'<mark>$1</mark>').replace(/~~(.*?)~~/g,'<del>$1</del>').replace(/!\[(.*?)\]\((.*?)\)/g,'<img src="$2" alt="$1" style="max-width:100%;">').replace(/\[(.*?)\]\((.*?)\)/g,'<a href="$2">$1</a>'); }
+        function escapeHtml(str) { return str.replace(/[&<>]/g, m => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;' }[m])); }
+        function scheduleRender() { if(renderDebounce) clearTimeout(renderDebounce); renderDebounce = setTimeout(()=>renderMarkdown(), 30); }
+        let renderDebounce; editor.addEventListener('input', scheduleRender);
+        
+        async function pasteTableToMarkdown() {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (!text.trim()) { alert("剪贴板为空，请先复制表格数据 (如Excel区域/HTML表格等)"); return; }
+                let rows = text.trim().split(/\r?\n/);
+                let separator = "\t";
+                if (rows[0].includes("\t")) separator = "\t";
+                else if (rows[0].includes(",")) separator = ",";
+                else if (rows[0].includes(";")) separator = ";";
+                else separator = " ";
+                const tableData = rows.map(row => row.split(separator).map(cell => cell.trim()));
+                if (tableData.length === 0) { alert("无法解析表格数据"); return; }
+                let md = "| " + tableData[0].join(" | ") + " |\n";
+                md += "|" + tableData[0].map(() => "---").join("|") + "|\n";
+                for (let i = 1; i < tableData.length; i++) {
+                    md += "| " + tableData[i].join(" | ") + " |\n";
+                }
+                const cursor = editor.selectionStart;
+                const before = editor.value.slice(0, cursor);
+                const after = editor.value.slice(cursor);
+                editor.value = before + "\n" + md + "\n" + after;
+                editor.setSelectionRange(cursor + md.length + 2, cursor + md.length + 2);
+                editor.focus();
+                scheduleRender();
+                alert("表格已转换为Markdown格式并插入!");
+            } catch(err) { console.error(err); alert("读取剪贴板失败，请允许剪贴板权限或手动复制文本表格"); }
+        }
+        
+        function resetSplitter() { const totalWidth = appMain.clientWidth; const explorerWidth = fileExplorer.classList.contains('hidden') ? 0 : 260; const availableWidth = totalWidth - explorerWidth - resizeHandle.offsetWidth; const editorWidth = availableWidth / 2; editorWrapper.style.width = editorWidth + 'px'; editorWrapper.style.flex = 'none'; previewContainer.style.flex = '1'; }
+        let isDragging=false, startX=0, startEditorWidth=0;
+        resizeHandle.addEventListener('mousedown', (e) => { e.preventDefault(); isDragging=true; startX=e.clientX; startEditorWidth=editorWrapper.offsetWidth; resizeHandle.classList.add('dragging'); document.body.classList.add('resizing'); document.body.style.userSelect='none'; });
+        document.addEventListener('mousemove', (e) => { if(!isDragging) return; const deltaX=e.clientX-startX; let newEditorWidth=startEditorWidth+deltaX; const explorerWidth=fileExplorer.classList.contains('hidden')?0:260; const maxWidth=appMain.clientWidth-explorerWidth-resizeHandle.offsetWidth-150; newEditorWidth=Math.min(maxWidth, Math.max(220, newEditorWidth)); editorWrapper.style.width=newEditorWidth+'px'; editorWrapper.style.flex='none'; previewContainer.style.flex='1'; });
+        document.addEventListener('mouseup', () => { if(isDragging){ isDragging=false; resizeHandle.classList.remove('dragging'); document.body.classList.remove('resizing'); document.body.style.userSelect=''; } });
+        resizeHandle.addEventListener('dblclick', () => resetSplitter());
+        window.addEventListener('resize', () => resetSplitter());
+        function toggleExplorer(show) { fileExplorer.classList.toggle('hidden', show===false); setTimeout(() => resetSplitter(), 10); }
+        toggleFileExplorerBtn.onclick = () => toggleExplorer(); closeExplorerBtn.onclick = () => toggleExplorer(false);
+        selectFolderBtn.onclick = selectFolder; refreshFolderBtn.onclick = refreshFolder;
+        function toggleMaxPreview() { document.body.classList.toggle('max-preview'); maxBtn.textContent = document.body.classList.contains('max-preview') ? '🗂️ 退出预览' : '🔍 最大化预览'; if (!document.body.classList.contains('max-preview')) setTimeout(() => resetSplitter(), 10); }
+        maxBtn.onclick = toggleMaxPreview; closeTocBtn.onclick = () => tocPanel.classList.add('hidden');
+        generateTocBtn.onclick = () => { if(tocPanel.classList.contains('hidden')) tocPanel.classList.remove('hidden'); updateSideToc(); };
+        importBtn.onclick = () => fileInput.click();
+        fileInput.onchange = async (e) => { const f=e.target.files[0]; if(f){ currentFileName=f.name; if(f.name.match(/\.(png|jpg|jpeg)$/i)){ const reader=new FileReader(); reader.onload=ev=>{ const imgMd = `![${f.name}](${ev.target.result})`; editor.value=imgMd; renderMarkdown(); }; reader.readAsDataURL(f); } else if(f.name.match(/\.(xlsx|xls)$/i)){ const reader=new FileReader(); reader.onload=ev=>{ const data=new Uint8Array(ev.target.result); const workbook=XLSX.read(data,{type:'array'}); const firstSheet=workbook.Sheets[workbook.SheetNames[0]]; const markdownTable=sheetToMarkdown(firstSheet); editor.value=markdownTable; renderMarkdown(); }; reader.readAsArrayBuffer(f); } else { const reader=new FileReader(); reader.onload=ev=>{ editor.value=ev.target.result; renderMarkdown(); }; reader.readAsText(f,'UTF-8'); } fileInput.value=''; } };
+        saveBtn.onclick = () => {
+            if (isTauri && currentFileName && currentFolderPath) {
+                window.__TAURI__.tauri.invoke('write_text_file_in_dir', { dir: currentFolderPath, filename: currentFileName, content: editor.value })
+                    .then(() => alert('保存成功'))
+                    .catch(e => { console.error(e); alert('保存失败'); });
+                return;
+            }
+            const blob = new Blob([editor.value], {type:'text/markdown'});
+            const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=currentFileName; a.click(); URL.revokeObjectURL(a.href);
+        };
+        function setTheme(theme,btn) { document.body.classList.remove('light','dark','highlight','colorblind'); document.body.classList.add(theme); document.querySelectorAll('.theme-btn').forEach(b=>b.classList.remove('active-theme')); if(btn) btn.classList.add('active-theme'); scheduleRender(); }
+        themeButtons.forEach(btn => btn.addEventListener('click', () => setTheme(btn.getAttribute('data-theme'), btn)));
+        function wrap(symbol) { const start=editor.selectionStart, end=editor.selectionEnd; if(start===end){ insertAtCursor(symbol+symbol); editor.setSelectionRange(start+symbol.length, start+symbol.length); scheduleRender(); return; } const selected=editor.value.substring(start,end); insertAtCursor(symbol+selected+symbol); }
+        function insertAtCursor(text) {
+            const start = editor.selectionStart, end = editor.selectionEnd;
+            editor.value = editor.value.slice(0, start) + text + editor.value.slice(end);
+            editor.setSelectionRange(start + text.length, start + text.length);
+            editor.focus();
+            scheduleRender();
+        }
+        document.getElementById('boldBtn').onclick = () => wrap('**');
+        document.getElementById('italicBtn').onclick = () => wrap('*');
+        document.getElementById('strikeBtn').onclick = () => wrap('~~');
+        document.getElementById('highlightBtn').onclick = () => wrap('==');
+        document.getElementById('h1Btn').onclick = () => insertAtCursor('# ');
+        document.getElementById('h2Btn').onclick = () => insertAtCursor('## ');
+        document.getElementById('h3Btn').onclick = () => insertAtCursor('### ');
+        document.getElementById('ulBtn').onclick = () => insertAtCursor('- ');
+        document.getElementById('olBtn').onclick = () => insertAtCursor('1. ');
+        document.getElementById('taskBtn').onclick = () => insertAtCursor('- [ ] ');
+        document.getElementById('quoteBtn').onclick = () => insertAtCursor('> ');
+        document.getElementById('codeBtn').onclick = () => insertAtCursor('```\\n\\n```');
+        document.getElementById('linkBtn').onclick = () => {
+            const sel = editor.value.substring(editor.selectionStart, editor.selectionEnd);
+            insertAtCursor(sel ? `[${sel}](url)` : '[链接文字](url)');
+        };
+        document.getElementById('imgBtn').onclick = () => insertAtCursor('![图片描述](图片URL)');
+        document.getElementById('tableBtn').onclick = () => insertAtCursor('\n| 表头1 | 表头2 |\n|-------|-------|\n| 内容1 | 内容2 |\n');
+        document.getElementById('footnoteBtn').onclick = () => insertFootnote();
+        document.getElementById('mathBtn').onclick = () => insertAtCursor('$$ E = mc^2 $$');
+        document.getElementById('mermaidBtn').onclick = () => insertAtCursor('```mermaid\\ngraph TD\\n    A[开始] --> B[结束]\\n```');
+        document.getElementById('hrBtn').onclick = () => insertAtCursor('\n---\n');
+        document.getElementById('pasteTableBtn').onclick = pasteTableToMarkdown;
+        
+        const defaultMarkdown = `# 多格式支持编辑器 (PNG/JPG/CSV/TXT + XLSX表格/粘贴表格)
+
+[TOC]
+
+这是一个正常的 Markdown 段落，应该不会有样式。
+
+> 注意：所有符号都是英文输入法下的符号
+> 井号加空格，几个井号就是几级标题，一级标题字体最大
+
+# 标题1
+## 标题2
+### 标题3
+---
+
+## 文本
+
+普通文字
+
+**段落粗体文字**
+
+*段落斜体文字*
+
+==高亮文字==
+
+~~删除文字~~
+
+***粗斜体文字***
+
+___粗斜体文字___
+---
+
+## 列表
+
+
+| 表头1 | 表头2 | 表头3 | 表头4 | 表头5 | 表头6 | 表头7 | 表头8 |
+|-------|-------|-------|-------|-------|-------|-------|-------|
+| 内容1 | 内容2 | 内容3 | 内容4 | 内容5 | 内容6 | 内容7 | 内容8 |
+| 内容a | 内容b | 内容c | 内容d | 内容e | 内容f | 内容g | 内容h |
+---
+## 引用语法
+
+> 💡 这是一个提示信息
+> 注意事项[^1]
+> 没得可能[^2]
+---
+[^1]: 示例脚注
+[^2]: 另一个脚注
+
+试试复制 Excel 中几行几列，点击“粘贴表格转Markdown”按钮！`;
+
+        if(!editor.value.trim()) editor.value = defaultMarkdown;
+        async function init() { await renderMarkdown(); setTheme('light', document.querySelector('.theme-btn[data-theme="light"]')); tocPanel.classList.add('hidden'); initScrollSync(); setTimeout(() => resetSplitter(), 100); }
+        init();
+    })();
+</script>
+</body>
+</html>

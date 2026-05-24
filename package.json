@@ -1,0 +1,9 @@
+{
+  "name": "markdown-tauri-app",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "start": "tauri dev",
+    "build": "tauri build"
+  }
+}

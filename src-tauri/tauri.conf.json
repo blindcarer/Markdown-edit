@@ -1,0 +1,16 @@
+{
+  "build": {
+    "distDir": "../src",
+    "devPath": "../src"
+  },
+  "tauri": {
+    "bundle": {
+      "identifier": "com.example.markdownreader",
+      "icon": [],
+      "resources": []
+    },
+    "security": {
+      "csp": null
+    }
+  }
+}
