@@ -4,7 +4,7 @@
 
 ### 前提条件
 
-- 已有项目位置：`tauri-app`（工作区路径：`e:/Blindcare/Documents/Claude/tauri-app`）
+- 已有项目位置：`tauri-app`（工作区路径：`.../tauri-app`）
 - 推荐安装：Rust + Cargo（MSVC toolchain）、Visual C++ Build Tools / Windows SDK、Node.js、npm
 - 可选：`git`, `yarn` 或 `pnpm`
 
@@ -32,13 +32,13 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 cargo install tauri-cli
 
 # 方式 B: 作为项目开发依赖（推荐在前端使用 npm 管理）
-npm install -D @tauri-apps/cli
+npm install -D @markdown/cli
 ```
 
-### 项目依赖安装（在项目根 `tauri-app` 下）
+### 项目依赖安装（在项目根 `markdown` 下）
 
 ```powershell
-cd /d e:\Blindcare\Documents\Claude\tauri-app
+cd /d ......\markdown
 npm install
 ```
 
@@ -47,7 +47,7 @@ npm install
 ### 开发（热重载）
 
 ```powershell
-cd /d e:\Blindcare\Documents\Claude\tauri-app
+cd /d ......\markdown
 npm run start
 # 或者（若使用全局 tauri-cli）
 # cargo tauri dev
@@ -58,7 +58,7 @@ npm run start
 ### 打包为可执行（Release）
 
 ```powershell
-cd /d e:\Blindcare\Documents\Claude\tauri-app
+cd /d ......\tauri-app
 npm run build
 # 或者（使用 cargo tauri）
 # cargo tauri build
